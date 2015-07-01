@@ -55,30 +55,33 @@ end
 -- Override common's output handler to avoid writing headers
 -- in the reponse body.
 function common.send_output(out, status, headers, res_iter, write_method,res_line)
-   common.send_content(out, res_iter, out:write())
+   common.send_content(out, res_iter, "write")
 end
 
 -- Mock IO objects
 local function make_io_object(content)
-  local receiver = { buffer = content or "", bytes_read = 0 }
+  local receiver = { buffer = { content }, bytes_read = 0 }
 
   function receiver:write(content)
-    if content then
-      self.buffer = self.buffer .. content
-    end
+    self.buffer[#self.buffer + 1] = content
+    return true
   end
 
   function receiver:read(len)
+    -- first read will turn the buffer into a string
+    if type(self.buffer) == "table" then
+      self.buffer = table.concat(self.buffer)
+    end
     len = len or (#self.buffer - self.bytes_read)
     if self.bytes_read >= #self.buffer then return nil end
-    local s = self.buffer:sub(self.bytes_read + 1, len)
+    local s = self.buffer:sub(self.bytes_read + 1, self.bytes_read + len)
     self.bytes_read = self.bytes_read + len
     if self.bytes_read > #self.buffer then self.bytes_read = #self.buffer end
     return s
   end
 
   function receiver:clear()
-    self.buffer = ""
+    self.buffer = {}
     self.bytes_read = 0
   end
 
@@ -118,7 +121,13 @@ local function build_post(path, params, headers)
     req.CONTENT_TYPE   = "x-www-form-urlencoded"
   end
 
-  req.CONTENT_LENGTH = #body
+  -- if the path includes a query string, store it in the appropiate header
+  local qs = path:match("?(.+)$")
+  if qs then
+    req.QUERY_STRING = qs
+  end
+
+  req.CONTENT_LENGTH = headers["Content-Length"] or #body
 
   return {
     env    = req,
